@@ -1,365 +1,605 @@
-import React, { useMemo, useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 
-type Subfield =
-  | 'Environmental'
-  | 'Food'
-  | 'Agricultural'
-  | 'Medical'
-  | 'Pharmaceutical'
-  | 'Veterinary'
-  | 'Soil'
-  | 'Water'
-  | 'Biodeterioration';
+/* ---------- Types ---------- */
+type ScreeningStatus = 'pass' | 'warning' | 'fail';
+type ScopeFit = 'in-scope' | 'borderline' | 'out-of-scope';
+type Subfield = 'Environmental' | 'Food' | 'Agricultural' | 'Medical' | 'Pharmaceutical' | 'Veterinary' | 'Soil' | 'Water' | 'Biodeterioration';
 
-const SUBFIELDS: Subfield[] = [
-  'Environmental',
-  'Food',
-  'Agricultural',
-  'Medical',
-  'Pharmaceutical',
-  'Veterinary',
-  'Soil',
-  'Water',
-  'Biodeterioration',
-];
+interface ScreeningItem {
+  status: ScreeningStatus;
+  detail: string;
+}
 
-const KEYWORDS: Record<Subfield, string[]> = {
-  Environmental: ['environment', 'pollut', 'bioremediation', 'ecosystem', 'climate', 'biofilm', 'contaminant', 'wastewater'],
-  Food: ['food', 'fermentation', 'probiotic', 'spoilage', 'dairy', 'meat', 'listeria', 'salmonella', 'preserv', 'shelf life'],
-  Agricultural: ['crop', 'plant', 'rhizosphere', 'fertiliz', 'fertiliser', 'agricultur', 'nitrogen fixation', 'phytopath', 'biocontrol', 'maize', 'wheat'],
-  Medical: ['patient', 'clinical', 'infection', 'sepsis', 'antibiotic resist', 'pathogen', 'diagnos', 'hospital', 'human', 'antimicrobial resistance'],
-  Pharmaceutical: ['drug', 'pharmaceutic', 'compound', 'bioactive', 'natural product', 'secondary metabolite', 'antibiotic discovery', 'fermenter', 'bioprocess'],
-  Veterinary: ['cattle', 'poultry', 'livestock', 'animal', 'veterinar', 'bovine', 'swine', 'zoonotic', 'aquaculture'],
-  Soil: ['soil', 'microbiome', 'rhizobium', 'mycorrhiz', 'organic matter', 'carbon cycling', 'land', 'compost'],
-  Water: ['water', 'marine', 'aquatic', 'groundwater', 'river', 'drinking water', 'algae', 'cyanobacter', 'estuar'],
-  Biodeterioration: ['corrosion', 'biodeterioration', 'degradation of material', 'biofouling', 'heritage', 'concrete', 'plastic degrad', 'wood decay', 'monument'],
-};
-
-type Reviewer = {
+interface Reviewer {
   name: string;
-  affiliation: string;
-  expertise: Subfield[];
-  hIndex: number;
-  recentPubs: number;
+  institution: string;
+  expertise: string[];
   conflict: boolean;
-  conflictNote?: string;
-};
-
-const REVIEWERS: Reviewer[] = [
-  { name: 'Dr. Amara Okonkwo', affiliation: 'University of Ibadan', expertise: ['Environmental', 'Water'], hIndex: 31, recentPubs: 12, conflict: false },
-  { name: 'Prof. Lena Hartmann', affiliation: 'ETH Zürich', expertise: ['Soil', 'Agricultural'], hIndex: 44, recentPubs: 18, conflict: false },
-  { name: 'Dr. Rohan Mehta', affiliation: 'CSIR-IMTECH', expertise: ['Pharmaceutical', 'Medical'], hIndex: 27, recentPubs: 9, conflict: false },
-  { name: 'Dr. Sofia Marino', affiliation: 'University of Bologna', expertise: ['Food', 'Veterinary'], hIndex: 22, recentPubs: 14, conflict: true, conflictNote: 'Co-authored with submitting author in last 36 months' },
-  { name: 'Prof. Daniel Kowalski', affiliation: 'University of Warsaw', expertise: ['Biodeterioration', 'Environmental'], hIndex: 38, recentPubs: 7, conflict: false },
-  { name: 'Dr. Mei Lin Chen', affiliation: 'National University of Singapore', expertise: ['Medical', 'Pharmaceutical'], hIndex: 35, recentPubs: 21, conflict: false },
-  { name: 'Dr. Carlos Vega', affiliation: 'UNAM Mexico', expertise: ['Agricultural', 'Soil'], hIndex: 19, recentPubs: 11, conflict: false },
-  { name: 'Prof. Ingrid Larsen', affiliation: 'University of Copenhagen', expertise: ['Water', 'Environmental'], hIndex: 41, recentPubs: 16, conflict: true, conflictNote: 'Same institution as corresponding author' },
-  { name: 'Dr. Tobias Reuben', affiliation: 'University of Cape Town', expertise: ['Veterinary', 'Food'], hIndex: 24, recentPubs: 8, conflict: false },
-];
-
-const SAMPLES: { label: string; text: string }[] = [
-  {
-    label: 'Soil microbiome (in-scope)',
-    text:
-      'We characterised the rhizosphere soil microbiome of drought-stressed maize across three agricultural field sites. High-throughput 16S rRNA sequencing revealed shifts in mycorrhizal and rhizobium communities correlated with soil organic matter and carbon cycling. Inoculation with a biocontrol consortium improved crop nitrogen fixation and yield under field conditions.',
-  },
-  {
-    label: 'Clinical AMR (in-scope)',
-    text:
-      'A two-year surveillance of hospital patients identified rising antimicrobial resistance in clinical Klebsiella pneumoniae isolates. We assessed diagnostic turnaround and infection outcomes, characterising carbapenem-resistant pathogens and their impact on sepsis management in the intensive care unit.',
-  },
-  {
-    label: 'Pure quantum physics (out-of-scope)',
-    text:
-      'We report a topological phase transition in a two-dimensional electron gas under strong magnetic fields. Using density functional theory we compute the Berry curvature and predict quantised Hall conductance. No biological systems are involved in this condensed-matter study.',
-  },
-];
-
-function classify(text: string) {
-  const lower = text.toLowerCase();
-  const raw: Record<string, number> = {};
-  let total = 0;
-  for (const sf of SUBFIELDS) {
-    let score = 0;
-    for (const kw of KEYWORDS[sf]) {
-      const matches = lower.split(kw).length - 1;
-      score += matches;
-    }
-    raw[sf] = score;
-    total += score;
-  }
-  const microSignal = total;
-  const scores = SUBFIELDS.map((sf) => ({
-    subfield: sf,
-    confidence: total > 0 ? raw[sf] / total : 0,
-  })).sort((a, b) => b.confidence - a.confidence);
-  return { scores, microSignal };
 }
 
-const COLORS = {
-  bg: '#f4f7f6',
-  card: '#ffffff',
-  ink: '#10302b',
-  sub: '#3d5b54',
-  primary: '#0f8a6e',
-  primaryDark: '#0a6b56',
-  accent: '#e8f5f1',
-  border: '#dbe7e3',
-  warn: '#b4530a',
-  warnBg: '#fdf0e3',
-  danger: '#a4242b',
-  dangerBg: '#fbe9ea',
-};
-
-function Logo() {
-  return (
-    <svg width="34" height="34" viewBox="0 0 48 48" fill="none" aria-hidden="true">
-      <circle cx="24" cy="24" r="22" fill={COLORS.primary} />
-      <circle cx="24" cy="24" r="13" fill="none" stroke="#fff" strokeWidth="2.5" />
-      <circle cx="20" cy="20" r="3" fill="#fff" />
-      <circle cx="29" cy="26" r="2.2" fill="#fff" />
-      <circle cx="23" cy="29" r="1.6" fill="#fff" />
-      <path d="M33 33l6 6" stroke="#fff" strokeWidth="3" strokeLinecap="round" />
-    </svg>
-  );
+interface Manuscript {
+  id: string;
+  title: string;
+  authors: string;
+  date: string;
+  classification: { field: Subfield; confidence: number }[];
+  scopeFit: ScopeFit;
+  scopeReason: string;
+  screening: {
+    plagiarism: ScreeningItem;
+    methods: ScreeningItem;
+    reporting: ScreeningItem;
+  };
+  reviewers: Reviewer[];
 }
 
-function Bar({ value }: { value: number }) {
+/* ---------- Mock Data ---------- */
+const MANUSCRIPTS: Manuscript[] = [
+  {
+    id: 'm1',
+    title: 'Metagenomic analysis of microbial communities in anaerobic digesters treating dairy wastewater',
+    authors: 'Rodriguez et al.',
+    date: 'Submitted 2 hrs ago',
+    classification: [
+      { field: 'Agricultural', confidence: 0.96 },
+      { field: 'Environmental', confidence: 0.88 },
+      { field: 'Soil', confidence: 0.42 },
+    ],
+    scopeFit: 'in-scope',
+    scopeReason:
+      'Strong fit for Agricultural and Environmental sections. Mesophilic digester study aligns with the journal scope on applied environmental microbiology.',
+    screening: {
+      plagiarism: { status: 'pass', detail: 'iThenticate similarity index: 4%' },
+      methods: { status: 'pass', detail: 'Metagenomic protocols and statistical models fully described.' },
+      reporting: { status: 'pass', detail: 'MIxS-compliant metadata and data availability statement present.' },
+    },
+    reviewers: [
+      { name: 'Dr. Elena Varga', institution: 'Wageningen University', expertise: ['Anaerobic digestion', 'Metagenomics'], conflict: false },
+      { name: 'Prof. James Chen', institution: 'Tsinghua University', expertise: ['Environmental biotech', 'Waste treatment'], conflict: false },
+      { name: 'Dr. Sarah Okafor', institution: 'University of Ibadan', expertise: ['Agricultural systems', 'Biogas'], conflict: false },
+    ],
+  },
+  {
+    id: 'm2',
+    title: 'Antibiotic resistance gene dissemination in retail meat products: a One Health perspective',
+    authors: 'Thompson & Patel',
+    date: 'Submitted 5 hrs ago',
+    classification: [
+      { field: 'Food', confidence: 0.91 },
+      { field: 'Veterinary', confidence: 0.85 },
+      { field: 'Medical', confidence: 0.67 },
+    ],
+    scopeFit: 'borderline',
+    scopeReason:
+      'Food and Veterinary microbiology fit is strong, but the absence of mechanistic clinical linkage and incomplete sampling methodology places this at the lower threshold for the Medical section.',
+    screening: {
+      plagiarism: { status: 'pass', detail: 'Similarity index: 6%' },
+      methods: { status: 'warning', detail: 'Sampling randomization protocol not specified; qPCR primer validation incomplete.' },
+      reporting: { status: 'warning', detail: 'STROBE checklist partially addressed; funding statement present.' },
+    },
+    reviewers: [
+      { name: 'Dr. Mark Thompson', institution: 'CSIRO', expertise: ['Food safety', 'AMR surveillance'], conflict: false },
+      { name: 'Prof. Aisha Patel', institution: 'Royal Veterinary College', expertise: ['Veterinary AMR', 'Zoonoses'], conflict: false },
+    ],
+  },
+  {
+    id: 'm3',
+    title: 'Novel bacteriophage therapy for diabetic foot infections: a retrospective cohort study',
+    authors: 'Kim et al.',
+    date: 'Submitted 8 hrs ago',
+    classification: [
+      { field: 'Medical', confidence: 0.94 },
+      { field: 'Pharmaceutical', confidence: 0.79 },
+      { field: 'Veterinary', confidence: 0.31 },
+    ],
+    scopeFit: 'in-scope',
+    scopeReason:
+      'Clinical microbiology and phage therapy fit within Medical and Pharmaceutical scope. Flagged for methodological limitations that should be addressed in editorial screening.',
+    screening: {
+      plagiarism: { status: 'pass', detail: 'Similarity index: 3%' },
+      methods: { status: 'fail', detail: 'No control arm; sample size (n=12) underpowered; phage titering protocol not standardized.' },
+      reporting: { status: 'fail', detail: 'Retrospective cohort does not meet CONSORT-equivalent standards for interventional phage studies.' },
+    },
+    reviewers: [
+      { name: 'Dr. Robert Kim', institution: 'Seoul National University Hospital', expertise: ['Clinical microbiology', 'DFI'], conflict: false },
+      { name: 'Prof. Lisa Müller', institution: 'Ludwig-Maximilians-Universität', expertise: ['Phage biology', 'Therapeutic development'], conflict: false },
+    ],
+  },
+  {
+    id: 'm4',
+    title: 'Quantum dot synthesis for photovoltaic applications',
+    authors: 'Zhang et al.',
+    date: 'Submitted 12 hrs ago',
+    classification: [
+      { field: 'Biodeterioration', confidence: 0.12 },
+      { field: 'Environmental', confidence: 0.08 },
+    ],
+    scopeFit: 'out-of-scope',
+    scopeReason:
+      'Manuscript addresses materials chemistry and photovoltaics with no microbiology component. Recommended for transfer to a materials science or applied physics journal.',
+    screening: {
+      plagiarism: { status: 'pass', detail: 'Similarity index: 5%' },
+      methods: { status: 'warning', detail: 'Chemical synthesis described but irrelevant to journal scope.' },
+      reporting: { status: 'fail', detail: 'No biological data, methods, or reporting standards applicable.' },
+    },
+    reviewers: [],
+  },
+];
+
+/* ---------- Icons ---------- */
+const LogoIcon = ({ size = 40 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <circle cx="20" cy="20" r="14" stroke="#115e59" strokeWidth="2.5" />
+    <circle cx="20" cy="20" r="5" fill="#14b8a6" />
+    <path d="M28 28 L34 34" stroke="#115e59" strokeWidth="2.5" strokeLinecap="round" />
+    <path d="M20 8 L20 12" stroke="#115e59" strokeWidth="2" strokeLinecap="round" />
+    <path d="M20 28 L20 32" stroke="#115e59" strokeWidth="2" strokeLinecap="round" />
+    <path d="M8 20 L12 20" stroke="#115e59" strokeWidth="2" strokeLinecap="round" />
+    <path d="M28 20 L32 20" stroke="#115e59" strokeWidth="2" strokeLinecap="round" />
+  </svg>
+);
+
+const CheckIcon = () => (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <polyline points="20 6 9 17 4 12" />
+  </svg>
+);
+
+const WarningIcon = () => (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+    <line x1="12" y1="9" x2="12" y2="13" />
+    <line x1="12" y1="17" x2="12.01" y2="17" />
+  </svg>
+);
+
+const XIcon = () => (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <circle cx="12" cy="12" r="10" />
+    <line x1="15" y1="9" x2="9" y2="15" />
+    <line x1="9" y1="9" x2="15" y2="15" />
+  </svg>
+);
+
+const UserIcon = () => (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+    <circle cx="12" cy="7" r="4" />
+  </svg>
+);
+
+const DocumentIcon = () => (
+  <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+    <polyline points="14 2 14 8 20 8" />
+  </svg>
+);
+
+const SpinnerIcon = () => (
+  <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#115e59" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ animation: 'spin 1s linear infinite' }} aria-hidden="true">
+    <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+  </svg>
+);
+
+const LayersIcon = () => (
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M12 2L2 7l10 5 10-5-10-5z" />
+    <path d="M2 17l10 5 10-5" />
+    <path d="M2 12l10 5 10-5" />
+  </svg>
+);
+
+const ShieldIcon = () => (
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+  </svg>
+);
+
+const UsersIcon = () => (
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+    <circle cx="9" cy="7" r="4" />
+    <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+    <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+  </svg>
+);
+
+const PlugIcon = () => (
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+    <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+  </svg>
+);
+
+/* ---------- Helpers ---------- */
+const ScopeBadge = ({ fit }: { fit: ScopeFit }) => {
+  const config = {
+    'in-scope': { cls: 'in', label: 'In Scope' },
+    borderline: { cls: 'borderline', label: 'Borderline Fit' },
+    'out-of-scope': { cls: 'out', label: 'Out of Scope' },
+  };
+  const c = config[fit];
+  return <span className={`scope-badge ${c.cls}`}>{c.label}</span>;
+};
+
+const ScreeningRow = ({ label, item }: { label: string; item: ScreeningItem }) => {
+  const icon = item.status === 'pass' ? <CheckIcon /> : item.status === 'warning' ? <WarningIcon /> : <XIcon />;
   return (
-    <div style={{ background: COLORS.accent, borderRadius: 6, height: 8, overflow: 'hidden', flex: 1 }}>
-      <div style={{ width: `${Math.round(value * 100)}%`, background: COLORS.primary, height: '100%' }} />
+    <div className={`screening-row ${item.status}`}>
+      <div className={`screening-icon ${item.status}`}>{icon}</div>
+      <div className="screening-content">
+        <div className="screening-label">{label}</div>
+        <div className="screening-detail">{item.detail}</div>
+      </div>
     </div>
   );
-}
+};
 
+/* ---------- App ---------- */
 export default function App() {
-  const [text, setText] = useState('');
-  const [submitted, setSubmitted] = useState(false);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [showReport, setShowReport] = useState(false);
+  const demoRef = useRef<HTMLDivElement>(null);
 
-  const result = useMemo(() => {
-    if (!submitted || !text.trim()) return null;
-    const { scores, microSignal } = classify(text);
-    const topConfidence = scores[0]?.confidence ?? 0;
-    const inScope = microSignal >= 2 && topConfidence > 0;
-    const primary = scores[0]?.subfield;
-    const secondary = scores[1]?.confidence > 0.12 ? scores[1].subfield : null;
+  const selected = MANUSCRIPTS.find((m) => m.id === selectedId);
 
-    const matched = REVIEWERS.filter((r) =>
-      r.expertise.includes(primary as Subfield) || (secondary && r.expertise.includes(secondary))
-    )
-      .map((r) => ({
-        ...r,
-        fit: (r.expertise.includes(primary as Subfield) ? 0.6 : 0.35) + Math.min(r.hIndex, 50) / 200,
-      }))
-      .sort((a, b) => b.fit - a.fit)
-      .slice(0, 4);
+  useEffect(() => {
+    if (selectedId) {
+      setShowReport(false);
+      setAnalyzing(true);
+      const t = setTimeout(() => {
+        setAnalyzing(false);
+        setShowReport(true);
+      }, 1200);
+      return () => clearTimeout(t);
+    }
+  }, [selectedId]);
 
-    const wordCount = text.trim().split(/\s+/).length;
-    const checks = [
-      { label: 'Plagiarism risk', value: wordCount > 40 ? 'Low — 4% overlap' : 'Insufficient text to assess', ok: wordCount > 40 },
-      { label: 'Methods completeness', value: /method|sequenc|assess|analys|inoculat|surveillance|sampl/i.test(text) ? 'Methods section detected' : 'Methods description sparse', ok: /method|sequenc|assess|analys|inoculat|surveillance|sampl/i.test(text) },
-      { label: 'Reporting-standard compliance', value: inScope ? 'MIQE / STROBE fields present' : 'Cannot evaluate — scope unclear', ok: inScope },
-    ];
-
-    return { scores, inScope, primary, secondary, matched, checks, topConfidence };
-  }, [submitted, text]);
-
-  const runTriage = () => {
-    if (text.trim()) setSubmitted(true);
-  };
-
-  const loadSample = (t: string) => {
-    setText(t);
-    setSubmitted(false);
-  };
+  const scrollToDemo = () => demoRef.current?.scrollIntoView({ behavior: 'smooth' });
 
   return (
-    <div style={{ background: COLORS.bg, color: COLORS.ink, minHeight: '100vh', fontFamily: 'system-ui, -apple-system, Segoe UI, Roboto, sans-serif', lineHeight: 1.5 }}>
-      <style>{`* { box-sizing: border-box; } button { font-family: inherit; } textarea { font-family: inherit; }`}</style>
+    <div
+      style={{
+        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
+        color: '#475569',
+        background: '#f8fafc',
+        minHeight: '100vh',
+      }}
+    >
+      <style>{`
+        * { box-sizing: border-box; }
+        body { margin: 0; overflow-wrap: break-word; }
+        h1, h2, h3, h4, p { margin: 0; }
+        button { font-family: inherit; }
 
-      <header style={{ background: COLORS.card, borderBottom: `1px solid ${COLORS.border}`, padding: '14px 20px', position: 'sticky', top: 0, zIndex: 10 }}>
-        <div style={{ maxWidth: 1080, margin: '0 auto', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-          <Logo />
-          <div style={{ display: 'flex', flexDirection: 'column' }}>
-            <span style={{ fontSize: 19, fontWeight: 700, letterSpacing: -0.2 }}>MicroScope Submit</span>
-            <span style={{ fontSize: 13, color: COLORS.sub }}>AI manuscript triage for microbiology journals</span>
+        .container { width: 100%; max-width: 1200px; margin: 0 auto; padding: 0 24px; }
+        @media (max-width: 640px) { .container { padding: 0 16px; } }
+
+        .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 14px 28px; border-radius: 8px; font-weight: 600; font-size: 16px; border: none; cursor: pointer; transition: all 0.2s; text-decoration: none; line-height: 1; }
+        .btn-primary { background: #115e59; color: #fff; }
+        .btn-primary:hover { background: #0f3d3a; }
+        .btn-secondary { background: #fff; color: #115e59; border: 1px solid #115e59; }
+        .btn-secondary:hover { background: #f0fdfa; }
+
+        .section { padding: 64px 0; }
+        @media (max-width: 640px) { .section { padding: 40px 0; } }
+
+        .section-title { font-size: 28px; font-weight: 700; color: #0f3d3a; margin-bottom: 12px; line-height: 1.3; }
+        .section-subtitle { font-size: 17px; color: #475569; line-height: 1.6; margin-bottom: 32px; max-width: 640px; }
+
+        .card { background: #fff; border-radius: 12px; padding: 24px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); border: 1px solid #e2e8f0; }
+
+        .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 24px; }
+        @media (max-width: 1024px) { .grid-4 { grid-template-columns: repeat(2, 1fr); } }
+        @media (max-width: 640px) { .grid-4 { grid-template-columns: 1fr; } }
+
+        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+        @media (max-width: 768px) { .grid-2 { grid-template-columns: 1fr; } }
+
+        /* Header */
+        .header { background: #fff; border-bottom: 1px solid #e2e8f0; padding: 16px 0; position: sticky; top: 0; z-index: 50; }
+        .header-inner { display: flex; align-items: center; justify-content: space-between; }
+        .header-brand { display: flex; align-items: center; gap: 12px; }
+        .header-text { display: flex; flex-direction: column; }
+        .header-title { font-size: 18px; font-weight: 700; color: #0f3d3a; line-height: 1.2; }
+        .header-tagline { font-size: 13px; color: #64748b; line-height: 1.4; }
+
+        /* Hero */
+        .hero { background: linear-gradient(180deg, #f0fdfa 0%, #f8fafc 100%); padding: 80px 0; }
+        .hero-inner { max-width: 720px; }
+        .hero-eyebrow { display: inline-flex; align-items: center; gap: 8px; margin-bottom: 16px; color: #115e59; font-weight: 600; font-size: 14px; text-transform: uppercase; letter-spacing: 0.05em; }
+        .hero-title { font-size: 42px; font-weight: 800; color: #0f3d3a; line-height: 1.2; margin-bottom: 20px; letter-spacing: -0.02em; }
+        @media (max-width: 640px) { .hero-title { font-size: 32px; } }
+        .hero-subtitle { font-size: 18px; color: #475569; line-height: 1.7; margin-bottom: 32px; }
+        .hero-actions { display: flex; gap: 12px; flex-wrap: wrap; }
+
+        /* Features */
+        .feature-card { display: flex; flex-direction: column; gap: 12px; }
+        .feature-icon { width: 44px; height: 44px; color: #115e59; background: #f0fdfa; border-radius: 10px; display: flex; align-items: center; justify-content: center; }
+        .feature-title { font-size: 18px; font-weight: 600; color: #1e293b; line-height: 1.3; }
+        .feature-text { font-size: 15px; color: #475569; line-height: 1.6; }
+
+        /* Integrations */
+        .integrations { background: #fff; border-top: 1px solid #e2e8f0; border-bottom: 1px solid #e2e8f0; padding: 32px 0; text-align: center; }
+        .integrations-label { font-size: 14px; font-weight: 600; color: #64748b; margin-bottom: 16px; text-transform: uppercase; letter-spacing: 0.05em; }
+        .integration-pills { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
+        .integration-pill { padding: 8px 16px; border-radius: 9999px; border: 1px solid #e2e8f0; font-size: 14px; font-weight: 500; color: #475569; background: #f8fafc; }
+
+        /* Demo */
+        .demo-grid { display: grid; grid-template-columns: 360px 1fr; gap: 24px; align-items: start; }
+        @media (max-width: 1024px) { .demo-grid { grid-template-columns: 1fr; } }
+
+        .queue-panel { background: #fff; border-radius: 12px; border: 1px solid #e2e8f0; padding: 20px; }
+        .panel-title { font-size: 13px; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 16px; }
+
+        .queue-list { display: flex; flex-direction: column; gap: 10px; }
+        .queue-item { width: 100%; text-align: left; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; cursor: pointer; transition: all 0.2s; }
+        .queue-item:hover { border-color: #99f6e4; background: #f0fdfa; }
+        .queue-item.active { border-color: #115e59; background: #f0fdfa; box-shadow: 0 0 0 1px #115e59; }
+        .queue-item-title { font-size: 15px; font-weight: 600; color: #1e293b; display: block; margin-bottom: 6px; line-height: 1.4; }
+        .queue-item-meta { font-size: 13px; color: #64748b; display: block; margin-bottom: 8px; }
+        .queue-item-badge { display: inline-block; font-size: 11px; font-weight: 600; color: #115e59; background: #ccfbf1; padding: 3px 10px; border-radius: 9999px; }
+
+        .report-panel { background: #fff; border-radius: 12px; border: 1px solid #e2e8f0; padding: 24px; min-height: 400px; }
+        .report-placeholder { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 360px; color: #64748b; gap: 12px; text-align: center; }
+        .report-analyzing { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 360px; gap: 16px; color: #475569; }
+        .progress-bar { width: 200px; height: 6px; background: #e2e8f0; border-radius: 9999px; overflow: hidden; }
+        .progress-fill { height: 100%; background: #115e59; width: 0%; animation: load 1.2s ease-out forwards; }
+        @keyframes load { from { width: 0%; } to { width: 100%; } }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        .report-section { margin-bottom: 24px; padding-bottom: 24px; border-bottom: 1px solid #f1f5f9; }
+        .report-section:last-child { margin-bottom: 0; padding-bottom: 0; border-bottom: none; }
+        .report-section h4 { font-size: 12px; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 12px; }
+
+        .scope-badge { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 9999px; font-size: 14px; font-weight: 600; margin-bottom: 12px; }
+        .scope-badge.in { background: #d1fae5; color: #065f46; }
+        .scope-badge.borderline { background: #fef3c7; color: #92400e; }
+        .scope-badge.out { background: #fee2e2; color: #991b1b; }
+
+        .report-text { font-size: 15px; color: #475569; line-height: 1.6; }
+
+        .classification-grid { display: flex; flex-direction: column; gap: 10px; }
+        .classification-header { display: flex; justify-content: space-between; font-size: 14px; font-weight: 500; color: #334155; margin-bottom: 4px; }
+        .classification-bar-bg { height: 6px; background: #e2e8f0; border-radius: 9999px; overflow: hidden; }
+        .classification-bar-fill { height: 100%; background: #14b8a6; border-radius: 9999px; transition: width 0.6s ease; }
+
+        .screening-list { display: flex; flex-direction: column; gap: 10px; }
+        .screening-row { display: flex; align-items: flex-start; gap: 12px; padding: 12px; border-radius: 8px; background: #f8fafc; }
+        .screening-row.pass { background: #f0fdf4; }
+        .screening-row.warning { background: #fffbeb; }
+        .screening-row.fail { background: #fef2f2; }
+        .screening-icon { flex-shrink: 0; margin-top: 2px; }
+        .screening-icon.pass { color: #059669; }
+        .screening-icon.warning { color: #d97706; }
+        .screening-icon.fail { color: #dc2626; }
+        .screening-content { display: flex; flex-direction: column; gap: 2px; }
+        .screening-label { font-size: 14px; font-weight: 600; color: #1e293b; }
+        .screening-detail { font-size: 14px; color: #475569; line-height: 1.5; }
+
+        .reviewer-list { display: flex; flex-direction: column; gap: 10px; }
+        .reviewer-card { border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px; }
+        .reviewer-header { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+        .reviewer-name { font-size: 14px; font-weight: 600; color: #1e293b; }
+        .reviewer-inst { font-size: 13px; color: #64748b; }
+        .conflict-badge { margin-left: auto; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 9999px; background: #d1fae5; color: #065f46; white-space: nowrap; }
+        .reviewer-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+        .tag { font-size: 12px; font-weight: 500; color: #115e59; background: #f0fdfa; padding: 3px 8px; border-radius: 6px; border: 1px solid #ccfbf1; }
+
+        /* Footer */
+        .footer { background: #0f3d3a; color: #ccfbf1; padding: 56px 0; text-align: center; }
+        .footer-title { font-size: 24px; font-weight: 700; color: #fff; margin-bottom: 12px; }
+        .footer-text { font-size: 16px; color: #99f6e4; margin-bottom: 24px; max-width: 560px; margin-left: auto; margin-right: auto; line-height: 1.6; }
+      `}</style>
+
+      {/* Header */}
+      <header className="header">
+        <div className="container header-inner">
+          <div className="header-brand">
+            <LogoIcon size={36} />
+            <div className="header-text">
+              <div className="header-title">MicroScope Submit</div>
+              <div className="header-tagline">AI-Powered Editorial Triage for Microbiology Journals</div>
+            </div>
           </div>
         </div>
       </header>
 
-      <section style={{ maxWidth: 1080, margin: '0 auto', padding: '48px 20px 24px' }}>
-        <div style={{ maxWidth: 720 }}>
-          <div style={{ display: 'inline-block', background: COLORS.accent, color: COLORS.primaryDark, fontSize: 13, fontWeight: 600, padding: '6px 12px', borderRadius: 20, marginBottom: 18 }}>
-            Editorial workflow automation
+      {/* Hero */}
+      <section className="hero">
+        <div className="container hero-inner">
+          <div className="hero-eyebrow">
+            <LogoIcon size={20} /> MicroScope Submit
           </div>
-          <h1 style={{ fontSize: 'clamp(28px, 5vw, 44px)', lineHeight: 1.1, margin: '0 0 16px', letterSpacing: -0.8 }}>
-            Triage every submission in seconds — not days.
-          </h1>
-          <p style={{ fontSize: 18, color: COLORS.sub, margin: '0 0 28px' }}>
-            MicroScope Submit classifies manuscripts into your journal&apos;s subfields, flags out-of-scope papers before they reach editors, and matches conflict-free reviewers automatically.
+          <h1 className="hero-title">Automate scope-matching and reviewer assignment for high-volume multidisciplinary microbiology journals.</h1>
+          <p className="hero-subtitle">
+            Our intelligent triage layer uses domain-tuned language models to classify submissions by subfield, flag low-fit papers, and match them to verified reviewers—before an editor opens the PDF.
           </p>
-          <a href="#demo" data-cta="run-triage-hero" onClick={() => { const el = document.getElementById('manuscript-input'); if (el) (el as HTMLElement).focus(); }} style={{ display: 'inline-flex', alignItems: 'center', gap: 8, background: COLORS.primary, color: '#fff', textDecoration: 'none', fontWeight: 600, fontSize: 16, padding: '14px 26px', borderRadius: 10 }}>
-            Try the live triage demo
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M5 12h14M13 6l6 6-6 6" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
-          </a>
-        </div>
-        <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', marginTop: 40 }}>
-          {[['9', 'applied subfields auto-routed'], ['68%', 'less editor screening time'], ['< 30s', 'per-manuscript triage report']].map(([n, l]) => (
-            <div key={l} style={{ minWidth: 160 }}>
-              <div style={{ fontSize: 30, fontWeight: 700, color: COLORS.primary }}>{n}</div>
-              <div style={{ fontSize: 14, color: COLORS.sub }}>{l}</div>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <section id="demo" style={{ maxWidth: 1080, margin: '0 auto', padding: '24px 20px 64px' }}>
-        <h2 style={{ fontSize: 24, margin: '0 0 6px' }}>Interactive triage demo</h2>
-        <p style={{ color: COLORS.sub, margin: '0 0 20px', fontSize: 15 }}>Paste an abstract (or load a sample) and run the triage engine.</p>
-
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 20, alignItems: 'start' }}>
-          <div style={{ background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: 14, padding: 20 }}>
-            <label htmlFor="manuscript-input" style={{ fontWeight: 600, fontSize: 15, display: 'block', marginBottom: 8 }}>Manuscript abstract</label>
-            <textarea
-              id="manuscript-input"
-              value={text}
-              onChange={(e) => { setText(e.target.value); setSubmitted(false); }}
-              placeholder="Paste the abstract or full text here..."
-              rows={9}
-              style={{ width: '100%', resize: 'vertical', borderRadius: 10, border: `1px solid ${COLORS.border}`, padding: 12, fontSize: 15, color: COLORS.ink, outlineColor: COLORS.primary }}
-            />
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', margin: '12px 0' }}>
-              {SAMPLES.map((s) => (
-                <button key={s.label} onClick={() => loadSample(s.text)} style={{ background: COLORS.accent, color: COLORS.primaryDark, border: 'none', borderRadius: 8, padding: '7px 12px', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
-                  {s.label}
-                </button>
-              ))}
-            </div>
-            <button
-              data-cta="run-triage"
-              onClick={runTriage}
-              disabled={!text.trim()}
-              style={{ width: '100%', background: text.trim() ? COLORS.primary : '#9bb8b0', color: '#fff', border: 'none', borderRadius: 10, padding: '14px', fontSize: 16, fontWeight: 700, cursor: text.trim() ? 'pointer' : 'not-allowed' }}
-            >
-              Run triage
+          <div className="hero-actions">
+            <button className="btn btn-primary" data-cta="primary" onClick={scrollToDemo}>
+              Explore the Triage Engine
+            </button>
+            <button className="btn btn-secondary" onClick={scrollToDemo}>
+              View Screening Report
             </button>
           </div>
+        </div>
+      </section>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            {!result && (
-              <div style={{ background: COLORS.card, border: `1px dashed ${COLORS.border}`, borderRadius: 14, padding: 32, textAlign: 'center', color: COLORS.sub }}>
-                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" style={{ marginBottom: 8 }}><path d="M9 17l3 3 9-9M3 12l3 3M3 6l3 3 7-7" stroke={COLORS.primary} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                <p style={{ margin: 0, fontSize: 15 }}>Your structured screening report will appear here.</p>
+      {/* Features */}
+      <section className="section" style={{ background: '#fff' }}>
+        <div className="container">
+          <h2 className="section-title">Built for editorial bottlenecks</h2>
+          <p className="section-subtitle">MicroScope Submit addresses the four costliest friction points in multidisciplinary journal workflows.</p>
+          <div className="grid-4">
+            <div className="card feature-card">
+              <div className="feature-icon">
+                <LayersIcon />
               </div>
-            )}
+              <h3 className="feature-title">Automated Scope Classification</h3>
+              <p className="feature-text">Instantly tag submissions into nine applied microbiology subfields with confidence scoring, replacing manual triage queues.</p>
+            </div>
+            <div className="card feature-card">
+              <div className="feature-icon">
+                <ShieldIcon />
+              </div>
+              <h3 className="feature-title">Pre-Editorial Screening</h3>
+              <p className="feature-text">Surface plagiarism risk, methods gaps, and reporting-standard violations before they reach an editor's desk.</p>
+            </div>
+            <div className="card feature-card">
+              <div className="feature-icon">
+                <UsersIcon />
+              </div>
+              <h3 className="feature-title">Intelligent Reviewer Matching</h3>
+              <p className="feature-text">Match manuscripts to verified, conflict-free experts using publication-history vectors and institutional COI checks.</p>
+            </div>
+            <div className="card feature-card">
+              <div className="feature-icon">
+                <PlugIcon />
+              </div>
+              <h3 className="feature-title">Unified Integration Layer</h3>
+              <p className="feature-text">Works alongside Editorial Manager, ScholarOne, and other major submission systems via API—no rip-and-replace required.</p>
+            </div>
+          </div>
+        </div>
+      </section>
 
-            {result && (
-              <>
-                <div style={{ background: result.inScope ? COLORS.accent : COLORS.warnBg, border: `1px solid ${result.inScope ? COLORS.border : '#f0d3b3'}`, borderRadius: 14, padding: 18 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    {result.inScope ? (
-                      <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" fill={COLORS.primary} /><path d="M8 12l3 3 5-6" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                    ) : (
-                      <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M12 3l9 16H3z" fill={COLORS.warn} /><path d="M12 9v4M12 16v.5" stroke="#fff" strokeWidth="2" strokeLinecap="round" /></svg>
-                    )}
-                    <div>
-                      <div style={{ fontWeight: 700, fontSize: 16, color: result.inScope ? COLORS.primaryDark : COLORS.warn }}>
-                        {result.inScope ? 'In scope — route for review' : 'Likely out of scope — desk-reject candidate'}
-                      </div>
-                      <div style={{ fontSize: 13, color: COLORS.sub }}>
-                        {result.inScope
-                          ? `Primary section: ${result.primary}${result.secondary ? ` · Secondary: ${result.secondary}` : ''}`
-                          : 'No strong match to declared microbiology subfields.'}
-                      </div>
-                    </div>
+      {/* Integrations */}
+      <section className="integrations">
+        <div className="container">
+          <div className="integrations-label">Seamlessly integrates with</div>
+          <div className="integration-pills">
+            <span className="integration-pill">Editorial Manager</span>
+            <span className="integration-pill">ScholarOne Manuscripts</span>
+            <span className="integration-pill">Frontiers Review</span>
+            <span className="integration-pill">MDPI Manuscripts</span>
+            <span className="integration-pill">Hindawi</span>
+            <span className="integration-pill">eJournalPress</span>
+          </div>
+        </div>
+      </section>
+
+      {/* Demo */}
+      <section className="section" ref={demoRef} id="demo">
+        <div className="container">
+          <h2 className="section-title">Live Triage Simulator</h2>
+          <p className="section-subtitle">Select a submission from the queue to see how MicroScope Submit classifies, screens, and routes manuscripts in seconds.</p>
+          <div className="demo-grid">
+            <div className="queue-panel">
+              <div className="panel-title">Incoming Queue</div>
+              <div className="queue-list" role="list">
+                {MANUSCRIPTS.map((m) => (
+                  <button
+                    key={m.id}
+                    className={`queue-item ${selectedId === m.id ? 'active' : ''}`}
+                    onClick={() => setSelectedId(m.id)}
+                    role="listitem"
+                    aria-pressed={selectedId === m.id}
+                  >
+                    <span className="queue-item-title">{m.title}</span>
+                    <span className="queue-item-meta">
+                      {m.authors} • {m.date}
+                    </span>
+                    <span className="queue-item-badge">New</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="report-panel" aria-live="polite">
+              {!selectedId && (
+                <div className="report-placeholder">
+                  <DocumentIcon />
+                  <p style={{ fontSize: '15px', maxWidth: '280px', lineHeight: 1.5 }}>Select a manuscript from the queue to generate an AI triage report.</p>
+                </div>
+              )}
+              {selectedId && analyzing && (
+                <div className="report-analyzing">
+                  <SpinnerIcon />
+                  <p style={{ fontWeight: 500 }}>Analyzing scope, methods, and reviewer pool...</p>
+                  <div className="progress-bar">
+                    <div className="progress-fill" />
                   </div>
                 </div>
+              )}
+              {selectedId && !analyzing && showReport && selected && (
+                <div className="report-content">
+                  <div className="report-section">
+                    <h4>Scope Fit</h4>
+                    <ScopeBadge fit={selected.scopeFit} />
+                    <p className="report-text">{selected.scopeReason}</p>
+                  </div>
 
-                <div style={{ background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: 14, padding: 18 }}>
-                  <h3 style={{ margin: '0 0 12px', fontSize: 15 }}>Subfield classification</h3>
-                  {result.scores.filter((s) => s.confidence > 0).slice(0, 5).map((s) => (
-                    <div key={s.subfield} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
-                      <span style={{ width: 110, fontSize: 13, color: COLORS.ink }}>{s.subfield}</span>
-                      <Bar value={s.confidence} />
-                      <span style={{ width: 38, textAlign: 'right', fontSize: 12, color: COLORS.sub }}>{Math.round(s.confidence * 100)}%</span>
+                  <div className="report-section">
+                    <h4>Subfield Classification</h4>
+                    <div className="classification-grid">
+                      {selected.classification.map((c) => (
+                        <div key={c.field}>
+                          <div className="classification-header">
+                            <span>{c.field}</span>
+                            <span>{Math.round(c.confidence * 100)}%</span>
+                          </div>
+                          <div className="classification-bar-bg">
+                            <div className="classification-bar-fill" style={{ width: `${c.confidence * 100}%` }} />
+                          </div>
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                  {result.scores.every((s) => s.confidence === 0) && (
-                    <p style={{ fontSize: 13, color: COLORS.sub, margin: 0 }}>No microbiology subfield signals detected.</p>
+                  </div>
+
+                  <div className="report-section">
+                    <h4>Screening Report</h4>
+                    <div className="screening-list">
+                      <ScreeningRow label="Plagiarism Risk" item={selected.screening.plagiarism} />
+                      <ScreeningRow label="Methods Completeness" item={selected.screening.methods} />
+                      <ScreeningRow label="Reporting Compliance" item={selected.screening.reporting} />
+                    </div>
+                  </div>
+
+                  {selected.reviewers.length > 0 && (
+                    <div className="report-section">
+                      <h4>Suggested Reviewers</h4>
+                      <div className="reviewer-list">
+                        {selected.reviewers.map((r) => (
+                          <div key={r.name} className="reviewer-card">
+                            <div className="reviewer-header">
+                              <div style={{ color: '#64748b' }}>
+                                <UserIcon />
+                              </div>
+                              <div>
+                                <div className="reviewer-name">{r.name}</div>
+                                <div className="reviewer-inst">{r.institution}</div>
+                              </div>
+                              {r.conflict === false && <span className="conflict-badge">No Conflict</span>}
+                            </div>
+                            <div className="reviewer-tags">
+                              {r.expertise.map((e) => (
+                                <span key={e} className="tag">
+                                  {e}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
                   )}
                 </div>
-
-                {result.inScope && (
-                  <div style={{ background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: 14, padding: 18 }}>
-                    <h3 style={{ margin: '0 0 12px', fontSize: 15 }}>Suggested reviewers</h3>
-                    {result.matched.length === 0 && <p style={{ fontSize: 13, color: COLORS.sub, margin: 0 }}>No matching reviewers in pool.</p>}
-                    {result.matched.map((r) => (
-                      <div key={r.name} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, padding: '10px 0', borderTop: `1px solid ${COLORS.border}` }}>
-                        <div>
-                          <div style={{ fontWeight: 600, fontSize: 14 }}>{r.name}</div>
-                          <div style={{ fontSize: 12.5, color: COLORS.sub }}>{r.affiliation} · h-index {r.hIndex} · {r.expertise.join(', ')}</div>
-                          {r.conflict && (
-                            <div style={{ fontSize: 12, color: COLORS.danger, marginTop: 3 }}>Conflict flagged: {r.conflictNote}</div>
-                          )}
-                        </div>
-                        <span style={{ flexShrink: 0, fontSize: 11.5, fontWeight: 700, padding: '4px 9px', borderRadius: 20, background: r.conflict ? COLORS.dangerBg : COLORS.accent, color: r.conflict ? COLORS.danger : COLORS.primaryDark }}>
-                          {r.conflict ? 'Excluded' : 'Eligible'}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                <div style={{ background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: 14, padding: 18 }}>
-                  <h3 style={{ margin: '0 0 12px', fontSize: 15 }}>Screening report</h3>
-                  {result.checks.map((c) => (
-                    <div key={c.label} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0' }}>
-                      {c.ok ? (
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" fill={COLORS.primary} /><path d="M8 12l3 3 5-6" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                      ) : (
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" fill={COLORS.warn} /><path d="M12 7v5M12 15v.5" stroke="#fff" strokeWidth="2" strokeLinecap="round" /></svg>
-                      )}
-                      <div>
-                        <div style={{ fontSize: 13.5, fontWeight: 600 }}>{c.label}</div>
-                        <div style={{ fontSize: 12.5, color: COLORS.sub }}>{c.value}</div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </>
-            )}
+              )}
+            </div>
           </div>
         </div>
       </section>
 
-      <section style={{ background: COLORS.card, borderTop: `1px solid ${COLORS.border}`, padding: '56px 20px' }}>
-        <div style={{ maxWidth: 1080, margin: '0 auto' }}>
-          <h2 style={{ fontSize: 26, textAlign: 'center', margin: '0 0 8px' }}>Built for high-volume, multidisciplinary journals</h2>
-          <p style={{ textAlign: 'center', color: COLORS.sub, maxWidth: 560, margin: '0 auto 36px', fontSize: 16 }}>
-            A submission layer that integrates with your existing editorial system — no rip-and-replace.
-          </p>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 20 }}>
-            {[
-              { t: 'Scope-matching first', d: 'Out-of-scope papers are flagged before consuming editor time, with a transparent confidence score per subfield.' },
-              { t: 'Conflict-aware reviewers', d: 'Surfaces verified experts from publication histories and automatically excludes co-authors and institutional conflicts.' },
-              { t: 'Structured screening', d: 'Each manuscript ships with plagiarism risk, methods completeness, and reporting-standard compliance in one report.' },
-              { t: 'Section routing', d: 'Automatically routes to the right associate editor across nine applied microbiology areas.' },
-            ].map((f) => (
-              <div key={f.t} style={{ border: `1px solid ${COLORS.border}`, borderRadius: 14, padding: 20 }}>
-                <div style={{ width: 38, height: 38, borderRadius: 10, background: COLORS.accent, display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 12 }}>
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M12 2l2.4 6.8L21 9.6l-5 4.4L17.6 21 12 17.3 6.4 21 8 14l-5-4.4 6.6-.8z" fill={COLORS.primary} /></svg>
-                </div>
-                <h3 style={{ margin: '0 0 6px', fontSize: 16 }}>{f.t}</h3>
-                <p style={{ margin: 0, color: COLORS.sub, fontSize: 14.5 }}>{f.d}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <footer style={{ padding: '28px 20px', textAlign: 'center', color: COLORS.sub, fontSize: 13 }}>
-        <div style={{ maxWidth: 1080, margin: '0 auto' }}>
-          MicroScope Submit — prototype demo. Classification shown is an illustrative keyword model; production uses domain-tuned language models.
+      {/* Footer */}
+      <footer className="footer">
+        <div className="container">
+          <h2 className="footer-title">Ready to accelerate your editorial workflow?</h2>
+          <p className="footer-text">See how MicroScope Submit integrates with your existing submission system to deliver faster, fairer triage.</p>
+          <button className="btn btn-primary" onClick={scrollToDemo}>
+            Explore the Triage Engine
+          </button>
         </div>
       </footer>
     </div>
